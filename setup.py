@@ -19,18 +19,18 @@ def get_version(rel_path: str) -> str:
 
 
 setup(
-    name='chris-plugin-template',
-    version=get_version('app.py'),
-    description='A ChRIS DS plugin template',
+    name='dy_regiFlow',
+    version=get_version('dy_regiFlow.py'),
+    description='A dynamic ChRIS plugin to check PACS registration and control workflows ',
     author='FNNDSC',
     author_email='dev@babyMRI.org',
-    url='https://github.com/FNNDSC/python-chrisapp-template',
-    py_modules=['app'],
+    url='https://github.com/FNNDSC/pl-dy_regi',
+    py_modules=['dy_regiFlow','chris_pacs_service','base_client','chrisClient','pipeline','pfdcm'],
     install_requires=['chris_plugin'],
     license='MIT',
     entry_points={
         'console_scripts': [
-            'commandname = app:main'
+            'dy_regiFlow = dy_regiFlow:main'
         ]
     },
     classifiers=[
