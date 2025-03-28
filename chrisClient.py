@@ -39,31 +39,44 @@ class ChrisClient(BaseClient):
     def pacs_push(self):
         pass
 
-    def anonymize(self, dicom_dir: str, tag_struct: str, send_params: dict, pv_id: int):
-        dsdir_inst_id = self.pl_run_dicomdir(dicom_dir,tag_struct,pv_id)
+    def anonymize(self, dicom_dir: str, send_params: dict, pv_id: int):
+        dsdir_inst_id = self.pl_run_dicomdir(dicom_dir,pv_id)
         plugin_params = {
-            'dicom-anonymization': {
-                "tagStruct": tag_struct,
-                'fileFilter': '.dcm'
+            'send-dicoms-to-neuro-FS': {
+                "path": f"{send_params["neuro_location"]}/not-anon/{send_params["folder_name"]}/",
+                "include": "*.dcm",
+                "min_size": "0",
+                "timeout": "0",
+                "max_size": "1G",
+                "max_depth": "3"
             },
-            'push-to-orthanc': {
-                'inputFileFilter': "**/*dcm",
-                "orthancUrl": send_params["url"],
-                "username": send_params["username"],
-                "password": send_params["password"],
-                "pushToRemote": send_params["aec"]
+            'send-anon-dicoms-to-neuro-FS': {
+                "path": f"{send_params["neuro_location"]}/anon/{send_params["folder_name"]}/",
+                "include": "*.dcm",
+                "min_size": "0",
+                "timeout": "0",
+                "max_size": "1G",
+                "max_depth": "3"
+            },
+            'send-niftii-to-neuro-FS': {
+                "path": f"{send_params["neuro_location"]}/nifti/{send_params["folder_name"]}/",
+                "include": "*.nii",
+                "min_size": "0",
+                "timeout": "0",
+                "max_size": "1G",
+                "max_depth": "3"
             }
         }
         pipe = Pipeline(self.cl)
-        pipe.workflow_schedule(dsdir_inst_id, "DICOM anonymization and Orthanc push 20241217",
+        pipe.workflow_schedule(dsdir_inst_id, "DICOM anonymization, niftii conversion, and push to neuro tree v20250326",
                                plugin_params)
 
-    def pl_run_dicomdir(self, dicom_dir: str, tag_struct: str, pv_id: int) -> int:
+    def pl_run_dicomdir(self, dicom_dir: str, pv_id: int) -> int:
         pl_id = self.__get_plugin_id({"name": "pl-dsdircopy", "version": "1.0.2"})
         # 1) Run dircopy
         # empty directory check
         if len(dicom_dir) == 0:
-            LOG(f"No directory found in CUBE containing files for search : {tag_struct}")
+            LOG(f"No directory found in CUBE containing files for search")
             return
         pv_in_id = self.__create_feed(pl_id, {"previous_id": pv_id, 'dir': dicom_dir})
         return int(pv_in_id)

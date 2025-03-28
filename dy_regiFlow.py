@@ -84,10 +84,16 @@ parser.add_argument(
     help='JSON file containing DICOM data to be retrieved'
 )
 parser.add_argument(
-    '--tagStruct',
+    '--neuroLocation',
     default='',
     type=str,
-    help='directive to use to anonymize DICOMs'
+    help='a location in the neuro tree'
+)
+parser.add_argument(
+    '--folderName',
+    default='',
+    type=str,
+    help='folder name in neuro tree to push analysis data'
 )
 parser.add_argument(
     '--pollInterval',
@@ -100,34 +106,6 @@ parser.add_argument(
     default=50,
     type=int,
     help='max number of times to poll before error out'
-)
-parser.add_argument(
-    '--orthancUrl',
-    dest='orthancUrl',
-    type=str,
-    help='Orthanc server url',
-    default='http://0.0.0.0:8042'
-)
-parser.add_argument(
-    '--orthancUsername',
-    dest='orthancUsername',
-    type=str,
-    help='Orthanc server username',
-    default='orthanc'
-)
-parser.add_argument(
-    '--orthancPassword',
-    dest='orthancPassword',
-    type=str,
-    help='Orthanc server password',
-    default='orthanc'
-)
-parser.add_argument(
-    '--pushToRemote',
-    dest='pushToRemote',
-    type=str,
-    help='Remote modality',
-    default=''
 )
 parser.add_argument(
     "--inNode",
@@ -275,16 +253,14 @@ def check_registration(options: Namespace, retry_table: dict, client: PACSClient
         if registered_series_count:
             LOG(f"Series {series_instance} successfully registered to CUBE.")
             send_params = {
-                "url": options.orthancUrl,
-                "username": options.orthancUsername,
-                "password": options.orthancPassword,
-                "aec": options.pushToRemote
+                "neuro_location": options.neuroLocation,
+                "folder_name": options.folderName
             }
             dicom_dir = client.get_pacs_files({'SeriesInstanceUID': series_instance})
 
             # create connection object
             cube_con = ChrisClient(options.CUBEurl, options.CUBEuser, options.CUBEpassword)
-            cube_con.anonymize(dicom_dir, options.tagStruct, send_params, options.pluginInstanceID)
+            cube_con.anonymize(dicom_dir, send_params, options.pluginInstanceID)
         clone_retry_table.pop(series_instance)
 
     check_registration(options, clone_retry_table, client)
