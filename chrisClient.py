@@ -65,6 +65,14 @@ class ChrisClient(BaseClient):
                 "timeout": "0",
                 "max_size": "1G",
                 "max_depth": "3"
+            },
+            'send-json-to-neuro-FS': {
+                "path": f"{send_params["neuro_location"]}/nifti/json/{send_params["folder_name"]}/",
+                "include": "*.json",
+                "min_size": "0",
+                "timeout": "0",
+                "max_size": "1G",
+                "max_depth": "3"
             }
         }
         pipe = Pipeline(self.cl)
