@@ -27,7 +27,7 @@ logger_format = (
 logger.remove()
 logger.add(sys.stderr, format=logger_format)
 
-__version__ = '1.0.2'
+__version__ = '1.0.3'
 
 DISPLAY_TITLE = r"""
        _           _                          _______ _               
@@ -84,10 +84,22 @@ parser.add_argument(
     help='JSON file containing DICOM data to be retrieved'
 )
 parser.add_argument(
-    '--neuroLocation',
+    '--neuroDicomLocation',
     default='',
     type=str,
-    help='a location in the neuro tree'
+    help='a location in the neuro tree for DICOM'
+)
+parser.add_argument(
+    '--neuroAnonLocation',
+    default='',
+    type=str,
+    help='a location in the neuro tree for anon DICOM'
+)
+parser.add_argument(
+    '--neuroNiftiLocation',
+    default='',
+    type=str,
+    help='a location in the neuro tree for nifti'
 )
 parser.add_argument(
     '--folderName',
@@ -253,7 +265,9 @@ def check_registration(options: Namespace, retry_table: dict, client: PACSClient
         if registered_series_count:
             LOG(f"Series {series_instance} successfully registered to CUBE.")
             send_params = {
-                "neuro_location": options.neuroLocation,
+                "neuro_dcm_location": options.neuroDicomLocation,
+                "neuro_anon_location": options.neuroAnonLocation,
+                "neuro_nifti_location": options.neuroNiftiLocation,
                 "folder_name": options.folderName
             }
             dicom_dir = client.get_pacs_files({'SeriesInstanceUID': series_instance})

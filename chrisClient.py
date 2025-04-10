@@ -43,7 +43,7 @@ class ChrisClient(BaseClient):
         dsdir_inst_id = self.pl_run_dicomdir(dicom_dir,pv_id)
         plugin_params = {
             'send-dicoms-to-neuro-FS': {
-                "path": f"{send_params["neuro_location"]}/not_anon/{send_params["folder_name"]}/",
+                "path": f"{send_params["neuro_dcm_location"]}/{send_params["folder_name"]}/",
                 "include": "*.dcm",
                 "min_size": "0",
                 "timeout": "0",
@@ -51,15 +51,15 @@ class ChrisClient(BaseClient):
                 "max_depth": "3"
             },
             'send-anon-dicoms-to-neuro-FS': {
-                "path": f"{send_params["neuro_location"]}/anon/{send_params["folder_name"]}/",
+                "path": f"{send_params["neuro_anon_location"]}/{send_params["folder_name"]}/",
                 "include": "*.dcm",
                 "min_size": "0",
                 "timeout": "0",
                 "max_size": "1G",
                 "max_depth": "3"
             },
-            'send-niftii-data-to-neuro-FS': {
-                "path": f"{send_params["neuro_location"]}/nifti/{send_params["folder_name"]}/",
+            'send-niftii-to-neuro-FS': {
+                "path": f"{send_params["neuro_nifti_location"]}/{send_params["folder_name"]}/",
                 "include": "*",
                 "min_size": "0",
                 "timeout": "0",
