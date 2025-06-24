@@ -54,11 +54,12 @@ class Pipeline:
         # pudb.set_trace()
         id_pipeline: int = -1
         ld_node: list = []
-        d_pipeline: dict = self.cl.get_pipelines({'name': str_pipelineName})
+        d_pipeline: dict = self.cl.get_pipelines({'name': str_pipelineName}, timeout=100)
         if 'data' in d_pipeline:
             id_pipeline: int = d_pipeline['data'][0]['id']
             d_response: dict = self.cl.get_pipeline_default_parameters(
-                id_pipeline, {'limit': 1000}
+                id_pipeline, {'limit': 1000},
+                timeout=100
             )
             if 'data' in d_response:
                 ld_node = self.pluginParameters_setInNodes(
@@ -98,8 +99,8 @@ class Pipeline:
             {
                 'previous_plugin_inst_id': inputDataNodeID,
                 'nodes_info': json.dumps(d_pipeline['nodes'])
-            })
+            }, timeout=100)
         d_workflowInst: dict = self.cl.get_workflow_plugin_instances(
-            d_workflow['id'], {'limit': 1000}
+            d_workflow['id'], {'limit': 1000}, timeout=100
         )
         return d_workflowInst
