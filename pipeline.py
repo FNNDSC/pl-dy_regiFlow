@@ -1,106 +1,136 @@
 import json
+import requests
+from requests.auth import HTTPBasicAuth
+from requests.exceptions import RequestException, Timeout, HTTPError
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
+from loguru import logger
+
+
+def transform_plugin_data(nested_data_list: list[dict]) -> list[dict]:
+    """Flatten nested plugin data into a list of dictionaries."""
+    flat_data = []
+    for item in nested_data_list:
+        entry = {pair['name']: pair['value'] for pair in item.get("data", [])}
+        flat_data.append(entry)
+    return flat_data
+
+
+def update_plugin_parameters(d_piping: list[dict], plugin_params: dict) -> list[dict]:
+    """
+    Override default parameters in the pipeline with user-provided values.
+    """
+    for plugin_title, new_params in plugin_params.items():
+        for piping in d_piping:
+            if plugin_title in piping.get('title', ''):
+                for param in piping.get('plugin_parameter_defaults', []):
+                    if param['name'] in new_params:
+                        param['default'] = new_params[param['name']]
+    return d_piping
+
+
+def compute_workflow_nodes_info(pipeline_default_parameters: list[dict], include_all_defaults=False) -> list[dict]:
+    """
+    Build nodes_info structure from flattened default parameters.
+    """
+    pipings_dict = {}
+    for param in pipeline_default_parameters:
+        piping_id = param['plugin_piping_id']
+
+        if piping_id not in pipings_dict:
+            pipings_dict[piping_id] = {
+                'piping_id': piping_id,
+                'previous_piping_id': param['previous_plugin_piping_id'],
+                'title': param['plugin_piping_title'],
+                'plugin_parameter_defaults': []
+            }
+
+        if param['value'] is None or include_all_defaults:
+            pipings_dict[piping_id]['plugin_parameter_defaults'].append({
+                'name': param['param_name'],
+                'default': param['value']
+            })
+
+    # Clean up unused keys and prepare final list
+    nodes_info = []
+    for piping in pipings_dict.values():
+        if not piping['plugin_parameter_defaults']:
+            piping.pop('plugin_parameter_defaults', None)
+        nodes_info.append(piping)
+
+    return nodes_info
+
+
 class Pipeline:
     def __init__(self, client):
         self.cl = client
+        self.api_base = self.cl.url.rstrip('/')
+        self.auth = HTTPBasicAuth(self.cl.username, self.cl.password)
+        self.headers = {"Content-Type": "application/json"}
 
-    def pluginParameters_setInNodes(self,
-                                    d_piping: dict,
-                                    d_pluginParameters: dict
-                                    ) -> dict:
+    # --------------------------
+    # Retryable request handler
+    # --------------------------
+    @retry(
+        retry=retry_if_exception_type((RequestException, Timeout, HTTPError)),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        stop=stop_after_attempt(5),
+        reraise=True
+    )
+    def make_request(self, method, endpoint, **kwargs):
+        url = f"{self.api_base}{endpoint}"
+        response = requests.request(method, url, headers=self.headers, auth=self.auth, timeout=5, **kwargs)
+        response.raise_for_status()
+
+        try:
+            return response.json().get("collection", {}).get("items", [])
+        except ValueError:
+            return response.text
+
+    # --------------------------
+    # Pipeline helpers
+    # --------------------------
+    def get_pipeline_id(self, name: str) -> int:
+        """Fetch pipeline ID by name."""
+        logger.info(f"Fetching ID for pipeline: {name}")
+        response = self.make_request("GET", f"/pipelines/search/?name={name}")
+        for item in response:
+            for field in item.get("data", []):
+                if field.get("name") == "id":
+                    return field.get("value")
+        return -1
+
+    def get_pipeline_parameters(self, pipeline_id: int) -> list[dict]:
+        """Get default parameters for a pipeline."""
+        logger.info(f"Fetching default parameters for pipeline with ID: {pipeline_id}")
+        response = self.make_request("GET", f"/pipelines/{pipeline_id}/parameters/?limit=1000")
+        return transform_plugin_data(response)
+
+    def post_workflow(self, pipeline_id: int, previous_id: int, params: list[dict]) -> dict:
         """
-        Override default parameters in the `d_piping`
-
-        Args:
-            d_piping (dict):            the current default parameters for the
-                                        plugins in a pipeline
-            d_pluginParameters (dict):  a list of plugins and parameters to
-                                        set in the response
-
-        Returns:
-            dict:   a new piping structure with changes to some parameter values
-                    if required. If no d_pluginParameters is passed, simply
-                    return the piping unchanged.
-
+        Trigger a pipeline workflow in CUBE.
         """
-        for pluginTitle, d_parameters in d_pluginParameters.items():
-            for piping in d_piping:
-                if pluginTitle in piping.get('title'):
-                    for k, v in d_parameters.items():
-                        for d_default in piping.get('plugin_parameter_defaults'):
-                            if k in d_default.get('name'):
-                                d_default['default'] = v
-        return d_piping
-
-    def pipelineWithName_getNodes(
-            self,
-            str_pipelineName: str,
-            d_pluginParameters: dict = {}
-    ) -> dict:
-        """
-        Find a pipeline that contains the passed name <str_pipelineName>
-        and if found, return a nodes dictionary. Optionally set relevant
-        plugin parameters to values described in <d_pluginParameters>
-
-
-        Args:
-            str_pipelineName (str):         the name of the pipeline to find
-            d_pluginParameters (dict):      a set of optional plugin parameter
-                                            overrides
-
-        Returns:
-            dict: node dictionary (name, compute env, default parameters)
-                  and id of the pipeline
-        """
-        # pudb.set_trace()
-        id_pipeline: int = -1
-        ld_node: list = []
-        d_pipeline: dict = self.cl.get_pipelines({'name': str_pipelineName}, timeout=100)
-        if 'data' in d_pipeline:
-            id_pipeline: int = d_pipeline['data'][0]['id']
-            d_response: dict = self.cl.get_pipeline_default_parameters(
-                id_pipeline, {'limit': 1000},
-                timeout=100
-            )
-            if 'data' in d_response:
-                ld_node = self.pluginParameters_setInNodes(
-                    self.cl.compute_workflow_nodes_info(d_response['data'], True),
-                    d_pluginParameters)
-                for piping in ld_node:
-                    if piping.get('compute_resource_name'):
-                        del piping['compute_resource_name']
-        return {
-            'nodes': ld_node,
-            'id': id_pipeline
+        payload = {
+            "previous_plugin_inst_id": previous_id,
+            "nodes_info": json.dumps(params)
         }
+        return self.make_request("POST", f"/pipelines/{pipeline_id}/workflows/", json=payload)
 
-    def workflow_schedule(self,
-                          inputDataNodeID: str,
-                          str_pipelineName: str,
-                          d_pluginParameters: dict = {}
-                          ) -> dict:
+    def run_pipeline(self, pipeline_name: str, previous_inst: int, pipeline_params: dict):
         """
-        Schedule a workflow that has name <str_pipelineName> off a given node id
-        of <inputDataNodeID>.
-
-        Args:
-            inputDataNodeID (str):      id of parent node
-            str_pipelineName (str):     substring of workflow name to connect
-            d_pluginParameters (dict):  optional structure of default parameter
-                                        overrides
-
-        Returns:
-            dict: result from calling the client `get_workflow_plugin_instances`
+        Full workflow to:
+        1. Fetch pipeline ID
+        2. Get default parameters
+        3. Update them
+        4. Trigger the pipeline
         """
-        d_pipeline: dict = self.pipelineWithName_getNodes(
-            str_pipelineName, d_pluginParameters
-        )
-        d_workflow: dict = self.cl.create_workflow(
-            d_pipeline['id'],
-            {
-                'previous_plugin_inst_id': inputDataNodeID,
-                'nodes_info': json.dumps(d_pipeline['nodes'])
-            }, timeout=100)
-        d_workflowInst: dict = self.cl.get_workflow_plugin_instances(
-            d_workflow['id'], {'limit': 1000}, timeout=100
-        )
-        return d_workflowInst
+        try:
+            pipeline_id = self.get_pipeline_id(pipeline_name)
+            default_params = self.get_pipeline_parameters(pipeline_id)
+            nodes_info = compute_workflow_nodes_info(default_params, include_all_defaults=True)
+            updated_params = update_plugin_parameters(nodes_info, pipeline_params)
+            workflow = self.post_workflow(pipeline_id=pipeline_id, previous_id=previous_inst, params=updated_params)
+            logger.info(f"Workflow posted successfully: {workflow}")
+            return {"status": "Pipeline running"}
+        except Exception as ex:
+            logger.error(f"Running pipeline failed due to: {ex}")
+            return {"status": "Failed", "error": str(ex)}

@@ -8,6 +8,11 @@ import time
 from loguru import logger
 import sys
 from pipeline import Pipeline
+import requests
+from requests.auth import HTTPBasicAuth
+from requests.exceptions import RequestException, Timeout, HTTPError
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
+from urllib.parse import urlencode
 
 LOG = logger.debug
 
@@ -25,8 +30,29 @@ logger.add(sys.stderr, format=logger_format)
 class ChrisClient(BaseClient):
     def __init__(self, url: str, username: str, password: str):
         self.cl = client.Client(url, username, password)
-        self.cl.pacs_series_url = f"{url}pacs/series/"
-        self.req = PACSClient(self.cl.pacs_series_url,username,password)
+        self.api_base = url.rstrip('/')
+        self.auth = HTTPBasicAuth(username, password)
+        self.headers = {"Content-Type": "application/json"}
+        self.pacs_series_url = f"{self.api_base}/pacs/series"
+
+    # --------------------------
+    # Retryable request handler
+    # --------------------------
+    @retry(
+        retry=retry_if_exception_type((RequestException, Timeout, HTTPError)),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        stop=stop_after_attempt(5),
+        reraise=True
+    )
+    def make_request(self, method, endpoint, **kwargs):
+        url = f"{self.pacs_series_url}{endpoint}"
+        response = requests.request(method, endpoint, headers=self.headers, auth=self.auth, timeout=5, **kwargs)
+        response.raise_for_status()
+
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
 
     def create_con(self,params:dict):
         return self.cl
@@ -68,8 +94,9 @@ class ChrisClient(BaseClient):
             }
         }
         pipe = Pipeline(self.cl)
-        pipe.workflow_schedule(dsdir_inst_id, "DICOM anonymization, niftii conversion, and push to neuro tree v20250326",
-                               plugin_params)
+        pipe.run_pipeline(previous_inst=dsdir_inst_id,
+                          pipeline_name ="DICOM anonymization, niftii conversion, and push to neuro tree v20250326",
+                          pipeline_params=plugin_params)
 
     def pl_run_dicomdir(self, dicom_dir: str, pv_id: int) -> int:
         pl_id = self.__get_plugin_id({"name": "pl-dsdircopy", "version": "1.0.2"})
@@ -82,11 +109,20 @@ class ChrisClient(BaseClient):
         return int(pv_in_id)
 
     def __create_feed(self, plugin_id: str,params: dict):
-        response = self.cl.create_plugin_instance(plugin_id, params)
-        return response['id']
+        response = self.make_request("POST",f"{self.api_base}/plugins/{plugin_id}/instances/",json=params)
+        if response:
+            for item in response.get("collection", {}).get("items", []):
+                for field in item.get("data", []):
+                    if field.get("name") == "id":
+                        return field.get("value")
+        raise Exception(f"Plugin instance could not be scheduled")
 
     def __get_plugin_id(self, params: dict):
-        response = self.cl.get_plugins(params)
-        if response['total'] > 0:
-            return response['data'][0]['id']
+        query_string = urlencode(params)
+        response = self.make_request("GET", f"{self.api_base}/plugins/search/?{query_string}")
+        if response:
+            for item in response.get("collection", {}).get("items", []):
+                for field in item.get("data", []):
+                    if field.get("name") == "id":
+                        return field.get("value")
         raise Exception(f"No plugin found with matching search criteria {params}")

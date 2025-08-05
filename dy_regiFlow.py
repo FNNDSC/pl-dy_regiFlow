@@ -27,7 +27,7 @@ logger_format = (
 logger.remove()
 logger.add(sys.stderr, format=logger_format)
 
-__version__ = '1.0.4'
+__version__ = '1.0.5'
 
 DISPLAY_TITLE = r"""
        _           _                          _______ _               
@@ -204,13 +204,6 @@ def health_check(options) -> bool:
     try:
         if not options.pluginInstanceID:
             options.pluginInstanceID = os.environ['CHRIS_PREV_PLG_INST_ID']
-    except Exception as ex:
-        LOG(ex)
-        return False
-    try:
-        # create connection object
-        cube_con = ChrisClient(options.CUBEurl, options.CUBEuser, options.CUBEpassword)
-        cube_con.health_check()
     except Exception as ex:
         LOG(ex)
         return False
