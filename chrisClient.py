@@ -48,7 +48,7 @@ class ChrisClient(BaseClient):
     )
     def make_request(self, method: str, endpoint: str, **kwargs):
         response = requests.request(
-            method, endpoint, headers=self.headers, auth=self.auth, timeout=5, **kwargs
+            method, endpoint, headers=self.headers, auth=self.auth, timeout=30, **kwargs
         )
         response.raise_for_status()
 
@@ -56,6 +56,18 @@ class ChrisClient(BaseClient):
             return response.json()
         except ValueError:
             return response.text
+
+    def post_request(self, endpoint: str, **kwargs):
+        response = requests.request(
+            "POST", endpoint, headers=self.headers, auth=self.auth, timeout=30, **kwargs
+        )
+        response.raise_for_status()
+
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
 
     def create_con(self, params: dict):
         pass
@@ -113,22 +125,25 @@ class ChrisClient(BaseClient):
         """
         Run the pl-dsdircopy plugin on a DICOM directory.
         """
-        if not dicom_dir:
-            LOG("No directory found in CUBE containing files for search.")
-            raise ValueError("Empty DICOM directory path provided.")
+        try:
+            if not dicom_dir:
+                LOG("No directory found in CUBE containing files for search.")
+                raise ValueError("Empty DICOM directory path provided.")
 
-        plugin_id = self._get_plugin_id({"name": "pl-dsdircopy", "version": "1.0.2"})
-        instance_id = self._create_plugin_instance(plugin_id, {
-            "previous_id": pv_id,
-            "dir": dicom_dir
-        })
-        return int(instance_id)
+            plugin_id = self._get_plugin_id({"name": "pl-dsdircopy", "version": "1.0.2"})
+            instance_id = self._create_plugin_instance(plugin_id, {
+                "previous_id": pv_id,
+                "dir": dicom_dir
+            })
+            return int(instance_id)
+        except Exception as ex:
+            LOG(f"Error occurred while creating dsdircopy instance {ex}")
 
     def _create_plugin_instance(self, plugin_id: str, params: dict):
         """
         Create a plugin instance and return its ID.
         """
-        response = self.make_request("POST", f"{self.api_base}/plugins/{plugin_id}/instances/", json=params)
+        response = self.post_request( f"{self.api_base}/plugins/{plugin_id}/instances/", json=params)
         items = response.get("collection", {}).get("items", [])
 
         for item in items:

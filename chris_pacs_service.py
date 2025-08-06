@@ -39,7 +39,7 @@ class PACSClient(object):
         reraise=True
     )
     def make_request(self, method, endpoint, **kwargs):
-        response = requests.request(method, endpoint, headers=self.headers, auth=self.auth, timeout=5, **kwargs)
+        response = requests.request(method, endpoint, headers=self.headers, auth=self.auth, timeout=30, **kwargs)
         response.raise_for_status()
 
         try:
