@@ -192,9 +192,7 @@ def sanitize_for_cube(series: dict) -> dict:
     """
     TBD
     """
-    params = {}
-    params["SeriesInstanceUID"] = series["SeriesInstanceUID"]
-    params["StudyInstanceUID"] = series["StudyInstanceUID"]
+    params = {"SeriesInstanceUID": series["SeriesInstanceUID"], "StudyInstanceUID": series["StudyInstanceUID"]}
     return params
 
 def health_check(options) -> bool:
