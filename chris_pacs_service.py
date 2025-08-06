@@ -28,7 +28,6 @@ class PACSClient(object):
         self.auth = HTTPBasicAuth(username, password)
         self.headers = {"Content-Type": "application/json"}
         self.pacs_series_url = f"{self.api_base}/pacs/series"
-        self.req = request.Request(username, password)
 
     # --------------------------
     # Retryable request handler
@@ -40,7 +39,6 @@ class PACSClient(object):
         reraise=True
     )
     def make_request(self, method, endpoint, **kwargs):
-        url = f"{self.pacs_series_url}{endpoint}"
         response = requests.request(method, endpoint, headers=self.headers, auth=self.auth, timeout=5, **kwargs)
         response.raise_for_status()
 

@@ -61,10 +61,9 @@ def compute_workflow_nodes_info(pipeline_default_parameters: list[dict], include
 
 
 class Pipeline:
-    def __init__(self, client):
-        self.cl = client
-        self.api_base = self.cl.url.rstrip('/')
-        self.auth = HTTPBasicAuth(self.cl.username, self.cl.password)
+    def __init__(self, url, username, password):
+        self.api_base = url.rstrip('/')
+        self.auth = HTTPBasicAuth(username, password)
         self.headers = {"Content-Type": "application/json"}
 
     # --------------------------

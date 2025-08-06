@@ -219,6 +219,7 @@ def create_hash_table(retrieve_data: dict, retry: int) -> dict:
         retry_table[series["SeriesInstanceUID"]]["AccessionNumber"] = series["AccessionNumber"]
     return retry_table
 
+# Recursive method to check on registration and then run anonymization pipeline
 def check_registration(options: Namespace, retry_table: dict, client: PACSClient):
     # null check
     if len(retry_table) == 0:
@@ -265,7 +266,7 @@ def check_registration(options: Namespace, retry_table: dict, client: PACSClient
             }
             dicom_dir = client.get_pacs_files({'SeriesInstanceUID': series_instance})
 
-            # create connection object
+            # create ChRIS Client Object
             cube_con = ChrisClient(options.CUBEurl, options.CUBEuser, options.CUBEpassword)
             cube_con.anonymize(dicom_dir, send_params, options.pluginInstanceID)
         clone_retry_table.pop(series_instance)
