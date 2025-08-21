@@ -115,11 +115,12 @@ class ChrisClient(BaseClient):
         }
 
         pipe = Pipeline(self.api_base, self.username, self.password)
-        pipe.run_pipeline(
+        d_ret = pipe.run_pipeline(
             previous_inst=dsdir_inst_id,
             pipeline_name="DICOM anonymization, niftii conversion, and push to neuro tree v20250326",
             pipeline_params=plugin_params
         )
+        return d_ret
 
     def run_dicomdir_plugin(self, dicom_dir: str, pv_id: int) -> int:
         """
