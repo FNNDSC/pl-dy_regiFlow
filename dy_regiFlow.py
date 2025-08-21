@@ -27,7 +27,7 @@ logger_format = (
 logger.remove()
 logger.add(sys.stderr, format=logger_format)
 
-__version__ = '1.0.6'
+__version__ = '1.0.7'
 
 DISPLAY_TITLE = r"""
        _           _                          _______ _               
@@ -184,7 +184,11 @@ def main(options: Namespace, inputdir: Path, outputdir: Path):
                 raise Exception(f"Cannot verify registration for empty pacs data.")
 
             retry_table = create_hash_table(data, 5)
-            check_registration(options, retry_table, cube_cl)
+            registration_errors = check_registration(options, retry_table, cube_cl)
+
+            if registration_errors:
+                LOG(f"ERROR while running pipelines.")
+                sys.exit(1)
 
 def sanitize_for_cube(series: dict) -> dict:
     """
@@ -216,10 +220,10 @@ def create_hash_table(retrieve_data: dict, retry: int) -> dict:
     return retry_table
 
 # Recursive method to check on registration and then run anonymization pipeline
-def check_registration(options: Namespace, retry_table: dict, client: PACSClient):
+def check_registration(options: Namespace, retry_table: dict, client: PACSClient, contains_errors: bool=False):
     # null check
     if len(retry_table) == 0:
-        return
+        return contains_errors
 
     clone_retry_table = copy.deepcopy(retry_table)
 
@@ -264,10 +268,13 @@ def check_registration(options: Namespace, retry_table: dict, client: PACSClient
 
             # create ChRIS Client Object
             cube_con = ChrisClient(options.CUBEurl, options.CUBEuser, options.CUBEpassword)
-            cube_con.anonymize(dicom_dir, send_params, options.pluginInstanceID)
+            d_ret = cube_con.anonymize(dicom_dir, send_params, options.pluginInstanceID)
+            if d_ret.get('error'):
+                contains_errors = True
         clone_retry_table.pop(series_instance)
 
-    check_registration(options, clone_retry_table, client)
+    check_registration(options, clone_retry_table, client, contains_errors)
+    return contains_errors
 
 if __name__ == '__main__':
     main()

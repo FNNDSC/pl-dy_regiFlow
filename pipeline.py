@@ -138,7 +138,7 @@ class Pipeline:
             nodes_info = compute_workflow_nodes_info(default_params, include_all_defaults=True)
             updated_params = update_plugin_parameters(nodes_info, pipeline_params)
             workflow = self.post_workflow(pipeline_id=pipeline_id, previous_id=previous_inst, params=updated_params)
-            logger.info(f"Workflow posted successfully: {workflow}")
+            logger.info(f"Workflow posted successfully")
             return {"status": "Pipeline running"}
         except Exception as ex:
             logger.error(f"Running pipeline failed due to: {ex}")
