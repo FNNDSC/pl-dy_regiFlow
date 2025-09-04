@@ -1,5 +1,4 @@
 import requests
-from chrisclient import client, request
 from loguru import logger
 from requests.auth import HTTPBasicAuth
 from requests.exceptions import RequestException, Timeout, HTTPError
@@ -22,11 +21,9 @@ logger.add(sys.stderr, format=logger_format)
 
 
 class PACSClient(object):
-    def __init__(self, url: str, username: str, password: str):
-        self.cl = client
+    def __init__(self, url: str, token: str):
         self.api_base = url.rstrip('/')
-        self.auth = HTTPBasicAuth(username, password)
-        self.headers = {"Content-Type": "application/json"}
+        self.headers = {"Content-Type": "application/json", "Authorization": f"Token {token}"}
         self.pacs_series_url = f"{self.api_base}/pacs/series"
 
     # --------------------------
@@ -39,7 +36,7 @@ class PACSClient(object):
         reraise=True
     )
     def make_request(self, method, endpoint, **kwargs):
-        response = requests.request(method, endpoint, headers=self.headers, auth=self.auth, timeout=30, **kwargs)
+        response = requests.request(method, endpoint, headers=self.headers, timeout=30, **kwargs)
         response.raise_for_status()
 
         try:

@@ -27,7 +27,7 @@ logger_format = (
 logger.remove()
 logger.add(sys.stderr, format=logger_format)
 
-__version__ = '1.0.8'
+__version__ = '1.0.9'
 
 DISPLAY_TITLE = r"""
        _           _                          _______ _               
@@ -66,14 +66,9 @@ parser.add_argument(
     help="plugin instance ID from which to start analysis",
 )
 parser.add_argument(
-    "--CUBEuser",
-    default="chris",
-    help="CUBE/ChRIS username"
-)
-parser.add_argument(
-    "--CUBEpassword",
-    default="chris1234",
-    help="CUBE/ChRIS password"
+    "--CUBEtoken",
+    default="",
+    help="CUBE/ChRIS auth token"
 )
 parser.add_argument(
     '--inputJSONfile',
@@ -171,7 +166,7 @@ def main(options: Namespace, inputdir: Path, outputdir: Path):
     logger.add(log_file)
     if not health_check(options): return
 
-    cube_cl = PACSClient(options.CUBEurl, options.CUBEuser, options.CUBEpassword)
+    cube_cl = PACSClient(options.CUBEurl, options.CUBEtoken)
     mapper = PathMapper.file_mapper(inputdir, outputdir, glob=options.inputJSONfile)
     for input_file, output_file in mapper:
 
@@ -204,6 +199,15 @@ def health_check(options) -> bool:
     try:
         if not options.pluginInstanceID:
             options.pluginInstanceID = os.environ['CHRIS_PREV_PLG_INST_ID']
+    except Exception as ex:
+        LOG(ex)
+        return False
+    try:
+        # create connection object
+        if not options.CUBEtoken:
+            options.CUBEtoken = os.environ['CHRIS_USER_TOKEN']
+        cube_con = ChrisClient(options.CUBEurl, options.CUBEtoken)
+        cube_con.health_check()
     except Exception as ex:
         LOG(ex)
         return False
@@ -267,7 +271,7 @@ def check_registration(options: Namespace, retry_table: dict, client: PACSClient
             dicom_dir = client.get_pacs_files({'SeriesInstanceUID': series_instance})
 
             # create ChRIS Client Object
-            cube_con = ChrisClient(options.CUBEurl, options.CUBEuser, options.CUBEpassword)
+            cube_con = ChrisClient(options.CUBEurl, options.CUBEtoken)
             d_ret = cube_con.anonymize(dicom_dir, send_params, options.pluginInstanceID)
             if d_ret.get('error'):
                 contains_errors = True

@@ -30,12 +30,10 @@ LOG = logger.debug
 
 
 class ChrisClient(BaseClient):
-    def __init__(self, url: str, username: str, password: str):
+    def __init__(self, url: str, token: str):
         self.api_base = url.rstrip('/')
-        self.username = username
-        self.password = password
-        self.auth = HTTPBasicAuth(username, password)
-        self.headers = {"Content-Type": "application/json"}
+        self.token = token
+        self.headers = {"Content-Type": "application/json", "Authorization": f"Token {token}"}
 
     # ----------------------------------------
     # Retryable request handler
@@ -48,7 +46,7 @@ class ChrisClient(BaseClient):
     )
     def make_request(self, method: str, endpoint: str, **kwargs):
         response = requests.request(
-            method, endpoint, headers=self.headers, auth=self.auth, timeout=30, **kwargs
+            method, endpoint, headers=self.headers, timeout=30, **kwargs
         )
         response.raise_for_status()
 
@@ -59,7 +57,7 @@ class ChrisClient(BaseClient):
 
     def post_request(self, endpoint: str, **kwargs):
         response = requests.request(
-            "POST", endpoint, headers=self.headers, auth=self.auth, timeout=30, **kwargs
+            "POST", endpoint, headers=self.headers, timeout=30, **kwargs
         )
         response.raise_for_status()
 
@@ -73,7 +71,15 @@ class ChrisClient(BaseClient):
         pass
 
     def health_check(self):
-        return self.cl.get_chris_instance()
+        endpoint = f"{self.api_base}/"
+        response = requests.request("GET", endpoint, headers=self.headers, timeout=30)
+
+        response.raise_for_status()
+
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
 
     def pacs_pull(self):
         pass  # Placeholder for PACS pull implementation
@@ -114,7 +120,7 @@ class ChrisClient(BaseClient):
             }
         }
 
-        pipe = Pipeline(self.api_base, self.username, self.password)
+        pipe = Pipeline(self.api_base, self.token)
         d_ret = pipe.run_pipeline(
             previous_inst=dsdir_inst_id,
             pipeline_name="DICOM anonymization, niftii conversion, and push to neuro tree v20250326",
