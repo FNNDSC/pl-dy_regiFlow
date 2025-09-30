@@ -13,6 +13,7 @@ import sys
 import os
 import pfdcm
 import copy
+import asyncio
 
 LOG = logger.debug
 
@@ -27,7 +28,7 @@ logger_format = (
 logger.remove()
 logger.add(sys.stderr, format=logger_format)
 
-__version__ = '1.0.9'
+__version__ = '1.1.0'
 
 DISPLAY_TITLE = r"""
        _           _                          _______ _               
@@ -126,6 +127,18 @@ parser.add_argument(
     action="store_true",
     default=False,
 )
+parser.add_argument(
+    '--recipients',
+    default='',
+    type=str,
+    help='comma separated valid email recipient addresses'
+)
+parser.add_argument(
+    '--SMTPServer',
+    default='mailsmtp4.childrenshospital.org',
+    type=str,
+    help='valid email server'
+)
 parser.add_argument('-V', '--version', action='version',
                     version=f'%(prog)s {__version__}')
 
@@ -179,7 +192,7 @@ def main(options: Namespace, inputdir: Path, outputdir: Path):
                 raise Exception(f"Cannot verify registration for empty pacs data.")
 
             retry_table = create_hash_table(data, 5)
-            registration_errors = check_registration(options, retry_table, cube_cl)
+            registration_errors = asyncio.run(check_registration(options, retry_table, cube_cl))
 
             if registration_errors:
                 LOG(f"ERROR while running pipelines.")
@@ -221,10 +234,14 @@ def create_hash_table(retrieve_data: dict, retry: int) -> dict:
         retry_table[series["SeriesInstanceUID"]]["SeriesInstanceUID"] = series["SeriesInstanceUID"]
         retry_table[series["SeriesInstanceUID"]]["StudyInstanceUID"] = series["StudyInstanceUID"]
         retry_table[series["SeriesInstanceUID"]]["AccessionNumber"] = series["AccessionNumber"]
+        retry_table[series["SeriesInstanceUID"]]["PatientID"] = series["PatientID"]
+        retry_table[series["SeriesInstanceUID"]]["StudyDate"] = series["StudyDate"]
+        retry_table[series["SeriesInstanceUID"]]["Modality"] = series["Modality"]
+
     return retry_table
 
 # Recursive method to check on registration and then run anonymization pipeline
-def check_registration(options: Namespace, retry_table: dict, client: PACSClient, contains_errors: bool=False):
+async def check_registration(options: Namespace, retry_table: dict, client: PACSClient, contains_errors: bool=False):
     # null check
     if len(retry_table) == 0:
         return contains_errors
@@ -266,18 +283,21 @@ def check_registration(options: Namespace, retry_table: dict, client: PACSClient
                 "neuro_dcm_location": options.neuroDicomLocation,
                 "neuro_anon_location": options.neuroAnonLocation,
                 "neuro_nifti_location": options.neuroNiftiLocation,
-                "folder_name": options.folderName
+                "folder_name": options.folderName,
+                "recipients": options.recipients,
+                "smtp_server": options.SMTPServer
             }
             dicom_dir = client.get_pacs_files({'SeriesInstanceUID': series_instance})
+            series_data = json.dumps(retry_table[series_instance])
 
             # create ChRIS Client Object
             cube_con = ChrisClient(options.CUBEurl, options.CUBEtoken)
-            d_ret = cube_con.anonymize(dicom_dir, send_params, options.pluginInstanceID)
+            d_ret = await cube_con.anonymize(dicom_dir, send_params, options.pluginInstanceID, series_data)
             if d_ret.get('error'):
                 contains_errors = True
         clone_retry_table.pop(series_instance)
 
-    check_registration(options, clone_retry_table, client, contains_errors)
+    await check_registration(options, clone_retry_table, client, contains_errors)
     return contains_errors
 
 if __name__ == '__main__':

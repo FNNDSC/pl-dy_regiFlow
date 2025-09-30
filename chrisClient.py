@@ -87,10 +87,13 @@ class ChrisClient(BaseClient):
     def pacs_push(self):
         pass  # Placeholder for PACS push implementation
 
-    def anonymize(self, dicom_dir: str, send_params: dict, pv_id: int):
+    async def anonymize(self, dicom_dir: str, send_params: dict, pv_id: int, series_data: str):
         """
         Run the anonymization pipeline for a given DICOM directory and push results to specified neuro locations.
         """
+        d_series = json.loads(series_data)
+        d_series['Folder Name'] = send_params['folder_name']
+        d_series['SeriesDescription'] = dicom_dir.split('/')[-1]
         dsdir_inst_id = self.run_dicomdir_plugin(dicom_dir, pv_id)
 
         plugin_params = {
@@ -121,10 +124,13 @@ class ChrisClient(BaseClient):
         }
 
         pipe = Pipeline(self.api_base, self.token)
-        d_ret = pipe.run_pipeline(
+        d_ret = await pipe.run_pipeline(
             previous_inst=dsdir_inst_id,
             pipeline_name="DICOM anonymization, niftii conversion, and push to neuro tree v20250326",
-            pipeline_params=plugin_params
+            pipeline_params=plugin_params,
+            recipients=send_params['recipients'],
+            smtp_server=send_params['smtp_server'],
+            series_data=json.dumps(d_series)
         )
         return d_ret
 

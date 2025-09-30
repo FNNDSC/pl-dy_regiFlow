@@ -9,7 +9,6 @@ _ds_ plugin which takes in ...  as input files and
 creates ... as output files.
 
 ## Abstract
-
 ...
 
 ## Installation

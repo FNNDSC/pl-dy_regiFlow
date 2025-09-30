@@ -4,7 +4,10 @@ from requests.auth import HTTPBasicAuth
 from requests.exceptions import RequestException, Timeout, HTTPError
 from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 from loguru import logger
-
+import time
+import asyncio
+from urllib.parse import urlencode
+import pandas as pd
 
 def transform_plugin_data(nested_data_list: list[dict]) -> list[dict]:
     """Flatten nested plugin data into a list of dictionaries."""
@@ -107,13 +110,20 @@ class Pipeline:
                     return field.get("value")
         return -1
 
+    def get_pipeline_total_pipings(self, pipeline_id: int) -> int:
+        """Get the total number of plugin pipings in the given pipeline."""
+        logger.info(f"Fetching pipeline plugin piping list.")
+        response = self.make_request("GET", f"/pipelines/{pipeline_id}/pipings/?limit=100")
+        return len(response)
+
+
     def get_pipeline_parameters(self, pipeline_id: int) -> list[dict]:
         """Get default parameters for a pipeline."""
         logger.info(f"Fetching default parameters for pipeline with ID: {pipeline_id}")
         response = self.make_request("GET", f"/pipelines/{pipeline_id}/parameters/?limit=1000")
         return transform_plugin_data(response)
 
-    def post_workflow(self, pipeline_id: int, previous_id: int, params: list[dict]) -> dict:
+    def post_workflow(self, pipeline_id: int, previous_id: int, params: list[dict]) -> int:
         """
         Trigger a pipeline workflow in CUBE.
         """
@@ -121,9 +131,131 @@ class Pipeline:
             "previous_plugin_inst_id": previous_id,
             "nodes_info": json.dumps(params)
         }
-        return self.post_request(f"/pipelines/{pipeline_id}/workflows/", json=payload)
+        response = self.post_request(f"/pipelines/{pipeline_id}/workflows/", json=payload)
+        for item in response:
+            for field in item.get("data", []):
+                if field.get("name") == "id":
+                    return field.get("value")
+        return -1
 
-    def run_pipeline(self, pipeline_name: str, previous_inst: int, pipeline_params: dict):
+    async def get_workflow_status(self, workflow_id: int) -> dict:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._get_workflow_status, workflow_id)
+
+    def _get_workflow_status(self, workflow_id: int) -> dict:
+        """
+        1. Get workflow details for a given workflow id.
+        2. Check for errored jobs
+        3. return total jobs (finished + errored + cancelled)
+        """
+        finished_jobs = 0
+        errored_jobs = 0
+        cancelled_jobs = 0
+        created_jobs = 0
+        waiting_jobs = 0
+        scheduled_jobs = 0
+        started_jobs = 0
+        registering_jobs = 0
+
+        logger.info(f"Fetching workflow details for ID: {workflow_id}")
+        response = self.make_request("GET", f"/pipelines/workflows/{workflow_id}/")
+        for item in response:
+            for field in item.get("data", []):
+                if field.get("name") == "finished_jobs":
+                    finished_jobs = field.get("value")
+                if field.get("name") == "errored_jobs":
+                    errored_jobs = field.get("value")
+                if field.get("name") == "cancelled_jobs":
+                    cancelled_jobs = field.get("value")
+                if field.get("name") == "created_jobs":
+                    created_jobs = field.get("value")
+                if field.get("name") == "waiting_jobs":
+                    waiting_jobs = field.get("value")
+                if field.get("name") == "scheduled_jobs":
+                    scheduled_jobs = field.get("value")
+                if field.get("name") == "started_jobs":
+                    started_jobs = field.get("value")
+                if field.get("name") == "registering_jobs":
+                    registering_jobs = field.get("value")
+
+
+        return {
+            "finished_jobs": finished_jobs,
+            "total_jobs": finished_jobs + errored_jobs + cancelled_jobs + created_jobs + waiting_jobs + scheduled_jobs + started_jobs + registering_jobs,
+            "workflow_failed": (errored_jobs > 0)
+        }
+
+    async def monitor_pipeline(self, workflow_id, total_jobs, pv_inst, rcpts, smtp, series_data):
+        while True:
+            status = self._get_workflow_status(workflow_id)
+            if status["workflow_failed"]:
+                logger.error("Pipeline failed.")
+                self.run_notification_plugin(pv_inst, "Pipeline failed with errors", rcpts, smtp, series_data)
+                break
+            if status["finished_jobs"] >= total_jobs:
+                logger.info("Pipeline complete.")
+                break
+            if status["total_jobs"] < total_jobs:
+                self.run_notification_plugin(pv_inst, "Nodes deleted in pipeline", rcpts, smtp, series_data)
+                break
+            time.sleep(20)
+
+    def run_notification_plugin(self, pv_id: int, msg: str, rcpts: str, smtp: str, series_data: str) -> int:
+        """
+        Run the pl-notification plugin.
+        """
+        d_series = json.loads(series_data)
+        email_content = (f"An error occurred while running anonymization pipeline on the following data: "
+                         f"\nMRN: {d_series['PatientID']} "
+                         f"\nStudyDate: {d_series['StudyDate']}"
+                         f"\nModality: {d_series['Modality']}"
+                         f"\nSeriesDescription: {d_series['SeriesDescription']}"
+                         f"\nFolder Name: {d_series['Folder Name']}"
+                         f"\n\nKindly login to ChRIS to access the logs for more details.")
+
+        try:
+            plugin_id = self._get_plugin_id({"name": "pl-notification", "version": "0.1.0"})
+            instance_id = self._create_plugin_instance(plugin_id, {
+                "previous_id": pv_id,
+                "content": email_content,
+                "title": "pipeline-error",
+                "rcpt": rcpts,
+                "sender": "noreply@fnndsc.org",
+                "mail_server": smtp
+            })
+            return int(instance_id)
+        except Exception as ex:
+            logger.error(f"Error occurred while creating notification instance {ex}")
+
+    def _create_plugin_instance(self, plugin_id: str, params: dict):
+        """
+        Create a plugin instance and return its ID.
+        """
+        response = self.post_request( f"/plugins/{plugin_id}/instances/", json=params)
+
+        for item in response:
+            for field in item.get("data", []):
+                if field.get("name") == "id":
+                    return field.get("value")
+
+        raise RuntimeError("Plugin instance could not be scheduled.")
+
+    def _get_plugin_id(self, params: dict):
+        """
+        Fetch plugin ID by search parameters.
+        """
+        query_string = urlencode(params)
+        response = self.make_request("GET", f"/plugins/search/?{query_string}")
+
+        for item in response:
+            for field in item.get("data", []):
+                if field.get("name") == "id":
+                    return field.get("value")
+
+        raise RuntimeError(f"No plugin found with matching criteria: {params}")
+
+
+    async def run_pipeline(self, pipeline_name: str, previous_inst: int, pipeline_params: dict, recipients: str, smtp_server: str, series_data: str):
         """
         Full workflow to:
         1. Fetch pipeline ID
@@ -133,12 +265,19 @@ class Pipeline:
         """
         try:
             pipeline_id = self.get_pipeline_id(pipeline_name)
+            total_jobs = self.get_pipeline_total_pipings(pipeline_id)
             default_params = self.get_pipeline_parameters(pipeline_id)
             nodes_info = compute_workflow_nodes_info(default_params, include_all_defaults=True)
             updated_params = update_plugin_parameters(nodes_info, pipeline_params)
-            workflow = self.post_workflow(pipeline_id=pipeline_id, previous_id=previous_inst, params=updated_params)
+            workflow_id = self.post_workflow(pipeline_id=pipeline_id, previous_id=previous_inst, params=updated_params)
+            #self.run_notification_plugin(previous_inst)
+
+            # Start this in the background (not awaited)
+            asyncio.create_task(self.monitor_pipeline(workflow_id, total_jobs, previous_inst, recipients, smtp_server, series_data))
+
             logger.info(f"Workflow posted successfully")
             return {"status": "Pipeline running"}
+
         except Exception as ex:
             logger.error(f"Running pipeline failed due to: {ex}")
             return {"status": "Failed", "error": str(ex)}
