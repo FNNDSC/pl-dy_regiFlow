@@ -123,6 +123,33 @@ class Pipeline:
         response = self.make_request("GET", f"/pipelines/{pipeline_id}/parameters/?limit=1000")
         return transform_plugin_data(response)
 
+    def get_feed_id_from_plugin_inst(self, plugin_inst: int) -> int:
+        """Get feed_id from a given plugin instance"""
+        logger.info(f"Fetching feed id for plugin instance with ID: {plugin_inst}")
+        response = self.make_request("GET", f"/plugins/instances/{plugin_inst}/")
+        for item in response:
+            for field in item.get("data", []):
+                if field.get("name") == "feed_id":
+                    return field.get("value")
+        return -1
+
+    def get_feed_details_from_id(self, feed_id: int) -> dict:
+        """Get feed details given a feed id"""
+        feed_details = {}
+
+        logger.info(f"Getting feed details for ID: {feed_id}")
+        response = self.make_request("GET", f"/{feed_id}/")
+        for item in response:
+            for field in item.get("data", []):
+                if field.get("name") == "creation_date":
+                    feed_details["date"] = field.get("value")
+                if field.get("name") == "name":
+                    feed_details["name"] = field.get("value")
+                if field.get("name") == "owner_username":
+                    feed_details["owner"] = field.get("value")
+
+        return feed_details
+
     def post_workflow(self, pipeline_id: int, previous_id: int, params: list[dict]) -> int:
         """
         Trigger a pipeline workflow in CUBE.
@@ -204,21 +231,25 @@ class Pipeline:
         """
         Run the pl-notification plugin.
         """
+        feed_id = self.get_feed_id_from_plugin_inst(pv_id)
+        feed_details = self.get_feed_details_from_id(feed_id)
         d_series = json.loads(series_data)
         email_content = (f"An error occurred while running anonymization pipeline on the following data: "
+                         f"\nFeed Name: {feed_details['name']}"
+                         f"\nDate: {feed_details['date']}"
                          f"\nMRN: {d_series['PatientID']} "
                          f"\nStudyDate: {d_series['StudyDate']}"
                          f"\nModality: {d_series['Modality']}"
                          f"\nSeriesDescription: {d_series['SeriesDescription']}"
                          f"\nFolder Name: {d_series['Folder Name']}"
-                         f"\n\nKindly login to ChRIS to access the logs for more details.")
+                         f"\n\nKindly login to ChRIS as *{feed_details['owner']}* to access the logs for more details.")
 
         try:
             plugin_id = self._get_plugin_id({"name": "pl-notification", "version": "0.1.0"})
             instance_id = self._create_plugin_instance(plugin_id, {
                 "previous_id": pv_id,
                 "content": email_content,
-                "title": "pipeline-error",
+                "title": msg,
                 "rcpt": rcpts,
                 "sender": "noreply@fnndsc.org",
                 "mail_server": smtp
