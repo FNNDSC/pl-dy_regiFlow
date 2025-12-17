@@ -209,7 +209,7 @@ class Pipeline:
         return {
             "finished_jobs": finished_jobs,
             "total_jobs": finished_jobs + errored_jobs + cancelled_jobs + created_jobs + waiting_jobs + scheduled_jobs + started_jobs + registering_jobs,
-            "workflow_failed": (errored_jobs > 0)
+            "workflow_failed": (errored_jobs > 0 or cancelled_jobs > 0)
         }
 
     async def monitor_pipeline(self, workflow_id, total_jobs, pv_inst, rcpts, smtp, series_data):
@@ -217,15 +217,23 @@ class Pipeline:
             status = self._get_workflow_status(workflow_id)
             if status["workflow_failed"]:
                 logger.error("Pipeline failed.")
-                self.run_notification_plugin(pv_inst, "Pipeline failed with errors", rcpts, smtp, series_data)
+                # self.run_notification_plugin(pv_inst, "Pipeline failed with errors", rcpts, smtp, series_data)
                 break
             if status["finished_jobs"] >= total_jobs:
                 logger.info("Pipeline complete.")
                 break
             if status["total_jobs"] < total_jobs:
-                self.run_notification_plugin(pv_inst, "Nodes deleted in pipeline", rcpts, smtp, series_data)
+                logger.info("Nodes deleted from the workflow")
+                # self.run_notification_plugin(pv_inst, "Nodes deleted in pipeline", rcpts, smtp, series_data)
                 break
             time.sleep(20)
+
+    def write_to_error_logs(self):
+        """
+        Write to an error log file stored in /neuro tree
+        by running pl-neuro_push plugin
+        """
+        pass
 
     def run_notification_plugin(self, pv_id: int, msg: str, rcpts: str, smtp: str, series_data: str) -> int:
         """

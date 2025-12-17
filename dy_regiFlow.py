@@ -28,7 +28,7 @@ logger_format = (
 logger.remove()
 logger.add(sys.stderr, format=logger_format)
 
-__version__ = '1.1.1'
+__version__ = '1.1.2'
 
 DISPLAY_TITLE = r"""
        _           _                          _______ _               
@@ -237,8 +237,23 @@ def create_hash_table(retrieve_data: dict, retry: int) -> dict:
         retry_table[series["SeriesInstanceUID"]]["PatientID"] = series["PatientID"]
         retry_table[series["SeriesInstanceUID"]]["StudyDate"] = series["StudyDate"]
         retry_table[series["SeriesInstanceUID"]]["Modality"] = series["Modality"]
+        retry_table[series["SeriesInstanceUID"]]["NumberOfSeriesRelatedInstances"] = series["NumberOfSeriesRelatedInstances"]
 
     return retry_table
+
+def get_max_poll(file_count: int, default_poll: int) -> int:
+    """
+    Adjust polling to CUBE based on no. of series related instances
+    """
+    if file_count == 0:
+        total_polls = 0
+    elif file_count < 100:
+        total_polls = default_poll
+    else:
+        # 5 polls per 100 files
+        total_polls = default_poll * (file_count // 100)
+
+    return total_polls
 
 # Recursive method to check on registration and then run anonymization pipeline
 async def check_registration(options: Namespace, retry_table: dict, client: PACSClient, contains_errors: bool=False):
@@ -252,9 +267,11 @@ async def check_registration(options: Namespace, retry_table: dict, client: PACS
         LOG(f"Polling CUBE for series: {series_instance}.")
         registered_series_count = client.get_pacs_registered({'SeriesInstanceUID':series_instance})
 
+        file_count: int = retry_table[series_instance]["NumberOfSeriesRelatedInstances"]
+
         # poll CUBE at regular interval for the status of file registration
         poll_count: int = 0
-        total_polls: int = options.maxPoll
+        total_polls: int = get_max_poll(file_count, options.maxPoll)
         wait_poll: int = options.pollInterval
         while registered_series_count < 1 and poll_count < total_polls:
             poll_count += 1
