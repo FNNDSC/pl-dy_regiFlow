@@ -28,7 +28,7 @@ logger_format = (
 logger.remove()
 logger.add(sys.stderr, format=logger_format)
 
-__version__ = '1.1.2'
+__version__ = '1.1.3'
 
 DISPLAY_TITLE = r"""
        _           _                          _______ _               
@@ -241,19 +241,24 @@ def create_hash_table(retrieve_data: dict, retry: int) -> dict:
 
     return retry_table
 
-def get_max_poll(file_count: int, default_poll: int) -> int:
+def get_max_poll(file_count, default_poll: int) -> int:
     """
     Adjust polling to CUBE based on no. of series related instances
     """
-    if file_count == 0:
-        total_polls = 0
-    elif file_count < 100:
-        total_polls = default_poll
-    else:
-        # 5 polls per 100 files
-        total_polls = default_poll * (file_count // 100)
+    try:
+        file_count = int(file_count)
+    except (TypeError, ValueError):
+        raise TypeError(f"Expected int for file_count argument, got {file_count}")
 
-    return total_polls
+    if file_count == 0:
+        return 0
+
+    if file_count < 100:
+        return default_poll
+
+    # n polls per 100 files
+    return default_poll * (file_count // 100)
+
 
 # Recursive method to check on registration and then run anonymization pipeline
 async def check_registration(options: Namespace, retry_table: dict, client: PACSClient, contains_errors: bool=False):
