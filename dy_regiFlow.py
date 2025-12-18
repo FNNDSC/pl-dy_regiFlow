@@ -28,7 +28,7 @@ logger_format = (
 logger.remove()
 logger.add(sys.stderr, format=logger_format)
 
-__version__ = '1.1.3'
+__version__ = '1.1.4'
 
 DISPLAY_TITLE = r"""
        _           _                          _______ _               
@@ -243,21 +243,32 @@ def create_hash_table(retrieve_data: dict, retry: int) -> dict:
 
 def get_max_poll(file_count, default_poll: int) -> int:
     """
-    Adjust polling to CUBE based on no. of series related instances
+    Adjust polling to CUBE based on number of series-related instances
     """
+
+    MAX_POLL = 50
+
+    # Ensure file_count is an integer
     try:
         file_count = int(file_count)
     except (TypeError, ValueError):
-        raise TypeError(f"Expected int for file_count argument, got {file_count}")
+        raise TypeError(f"Expected int for file_count argument, got {file_count!r}")
 
-    if file_count == 0:
-        return 0
+    # Compute polls based on file count
+    polls = default_poll if file_count < 200 else default_poll * (file_count // 200)
 
-    if file_count < 100:
-        return default_poll
+    # Cap polls to MAX_POLL
+    final_polls = min(polls, MAX_POLL)
 
-    # n polls per 100 files
-    return default_poll * (file_count // 100)
+    # Log if poll increased due to file count or was capped
+    if final_polls != default_poll:
+        if final_polls > MAX_POLL:
+            LOG(f"Polling capped at {MAX_POLL} (computed={polls}, files={file_count})")
+        else:
+            LOG(f"Polling increased from {default_poll} → {final_polls} due to large file count ({file_count} files)")
+
+    return final_polls
+
 
 
 # Recursive method to check on registration and then run anonymization pipeline
