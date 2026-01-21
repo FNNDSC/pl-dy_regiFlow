@@ -87,6 +87,12 @@ class Pipeline:
         except ValueError:
             return response.text
 
+    @retry(
+        retry=retry_if_exception_type((RequestException, Timeout, HTTPError)),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        stop=stop_after_attempt(2),
+        reraise=True
+    )
     def post_request(self, endpoint: str, **kwargs):
         url = f"{self.api_base}{endpoint}"
         response = requests.request("POST", url, headers=self.headers, timeout=30, **kwargs)
@@ -173,7 +179,7 @@ class Pipeline:
         """
         1. Get workflow details for a given workflow id.
         2. Check for errored jobs
-        3. return total jobs (finished + errored + cancelled)
+        3. return total jobs (finished + errored + canceled)
         """
         finished_jobs = 0
         errored_jobs = 0
