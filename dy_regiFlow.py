@@ -226,27 +226,11 @@ def health_check(options) -> bool:
         return False
     return True
 
-def create_hash_table(retrieve_data: dict, retry: int) -> dict:
-    retry_table: dict = {}
-    for series in retrieve_data:
-        retry_table[series["SeriesInstanceUID"]] = {}
-        retry_table[series["SeriesInstanceUID"]]["retry"] = retry
-        retry_table[series["SeriesInstanceUID"]]["SeriesInstanceUID"] = series["SeriesInstanceUID"]
-        retry_table[series["SeriesInstanceUID"]]["StudyInstanceUID"] = series["StudyInstanceUID"]
-        retry_table[series["SeriesInstanceUID"]]["AccessionNumber"] = series["AccessionNumber"]
-        retry_table[series["SeriesInstanceUID"]]["PatientID"] = series["PatientID"]
-        retry_table[series["SeriesInstanceUID"]]["StudyDate"] = series["StudyDate"]
-        retry_table[series["SeriesInstanceUID"]]["Modality"] = series["Modality"]
-        retry_table[series["SeriesInstanceUID"]]["NumberOfSeriesRelatedInstances"] = series["NumberOfSeriesRelatedInstances"]
-
-    return retry_table
-
-def get_max_poll(file_count, default_poll: int) -> int:
+def get_max_retry(file_count: int, default_retry: int) -> int:
     """
-    Adjust polling to CUBE based on number of series-related instances
+    Adjust retry based on number of series related instances
     """
-
-    MAX_POLL = 50
+    MAX_RETRY = 50
 
     # Ensure file_count is an integer
     try:
@@ -255,19 +239,34 @@ def get_max_poll(file_count, default_poll: int) -> int:
         raise TypeError(f"Expected int for file_count argument, got {file_count!r}")
 
     # Compute polls based on file count
-    polls = default_poll if file_count < 200 else default_poll * (file_count // 200)
+    retries = default_retry if file_count < 2000 else default_retry * (file_count // 2000)
 
-    # Cap polls to MAX_POLL
-    final_polls = min(polls, MAX_POLL)
+    # Cap retries to MAX_RETRY
+    final_retries = min(retries, MAX_RETRY)
 
     # Log if poll increased due to file count or was capped
-    if final_polls != default_poll:
-        if final_polls > MAX_POLL:
-            LOG(f"Polling capped at {MAX_POLL} (computed={polls}, files={file_count})")
+    if final_retries != default_retry:
+        if final_retries > MAX_RETRY:
+            LOG(f"Retry capped at {MAX_RETRY} (computed={retries}, files={file_count})")
         else:
-            LOG(f"Polling increased from {default_poll} → {final_polls} due to large file count ({file_count} files)")
+            LOG(f"Retry increased from {default_retry} → {final_retries} due to large file count ({file_count} files)")
 
-    return final_polls
+    return final_retries
+
+def create_hash_table(retrieve_data: dict, retry: int) -> dict:
+    retry_table: dict = {}
+    for series in retrieve_data:
+        file_count = series["NumberOfSeriesRelatedInstances"]
+        retry_table[series["SeriesInstanceUID"]] = {}
+        retry_table[series["SeriesInstanceUID"]]["retry"] = get_max_retry(file_count, retry)
+        retry_table[series["SeriesInstanceUID"]]["SeriesInstanceUID"] = series["SeriesInstanceUID"]
+        retry_table[series["SeriesInstanceUID"]]["StudyInstanceUID"] = series["StudyInstanceUID"]
+        retry_table[series["SeriesInstanceUID"]]["AccessionNumber"] = series["AccessionNumber"]
+        retry_table[series["SeriesInstanceUID"]]["PatientID"] = series["PatientID"]
+        retry_table[series["SeriesInstanceUID"]]["StudyDate"] = series["StudyDate"]
+        retry_table[series["SeriesInstanceUID"]]["Modality"] = series["Modality"]
+
+    return retry_table
 
 
 
@@ -287,7 +286,7 @@ async def check_registration(options: Namespace, retry_table: dict, client: PACS
 
         # poll CUBE at regular interval for the status of file registration
         poll_count: int = 0
-        total_polls: int = get_max_poll(file_count, options.maxPoll)
+        total_polls: int = options.maxPoll
         wait_poll: int = options.pollInterval
         while registered_series_count < 1 and poll_count < total_polls:
             poll_count += 1
