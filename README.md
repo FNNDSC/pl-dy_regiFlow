@@ -1,15 +1,23 @@
 # A dynamic registration workflow control plugin
 
-[![Version](https://img.shields.io/docker/v/fnndsc/pl-dy_regiFlow?sort=semver)](https://hub.docker.com/r/fnndsc/pl-dy_regiFlow)
+[![Version](https://img.shields.io/docker/v/fnndsc/pl-dy_regiflow?sort=semver)](https://hub.docker.com/r/fnndsc/pl-dy_regiflow)
 [![MIT License](https://img.shields.io/github/license/fnndsc/pl-dy_regiFlow)](https://github.com/FNNDSC/pl-dy_regiFlow/blob/main/LICENSE)
 [![ci](https://github.com/FNNDSC/pl-dy_regiFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/FNNDSC/pl-dy_regiFlow/actions/workflows/ci.yml)
 
 `pl-dy_regiFlow` is a [_ChRIS_](https://chrisproject.org/)
-_ds_ plugin which takes in ...  as input files and
-creates ... as output files.
+_ds_ plugin that dynamically orchestrates a registration and anonymization
+workflow. It interfaces with a PACS endpoint to retrieve DICOM data, triggers
+downstream anonymization and conversion pipelines in CUBE/ChRIS, and manages
+workflow execution through polling and optional parallelization.
 
 ## Abstract
-...
+
+Clinical imaging workflows often require conditional execution, polling,
+and coordination across multiple systems such as PACS archives and ChRIS/CUBE.
+`pl-dy_regiFlow` provides a dynamic control layer that retrieves DICOM studies
+based on a provided JSON specification, interacts with a PACS endpoint for
+registration and query/retrieve, launches anonymization and conversion
+pipelines in ChRIS, and monitors workflow progress until completion.
 
 ## Installation
 

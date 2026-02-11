@@ -28,7 +28,7 @@ logger_format = (
 logger.remove()
 logger.add(sys.stderr, format=logger_format)
 
-__version__ = '1.1.4'
+__version__ = '1.1.5'
 
 DISPLAY_TITLE = r"""
        _           _                          _______ _               
@@ -112,6 +112,18 @@ parser.add_argument(
     default=50,
     type=int,
     help='max number of times to poll before error out'
+)
+parser.add_argument(
+    '--largeSequenceSize',
+    default=10000,
+    type=int,
+    help='sequence size that will be considered as large sequence for delayed polling'
+)
+parser.add_argument(
+    '--largeSequencePollInterval',
+    default=10,
+    type=int,
+    help='poll interval time for large sequences (in minutes)'
 )
 parser.add_argument(
     "--inNode",
@@ -226,11 +238,19 @@ def health_check(options) -> bool:
         return False
     return True
 
-def get_max_retry(file_count: int, default_retry: int) -> int:
+def handle_task_result(task: asyncio.Task):
+    try:
+        result = task.result()   # This re-raises exceptions if any
+        LOG("Task result:", result)
+    except Exception as e:
+        LOG("Task failed with:", e)
+
+def get_max_poll(file_count, default_poll: int) -> int:
     """
-    Adjust retry based on number of series related instances
+    Adjust polling to CUBE based on number of series-related instances
     """
-    MAX_RETRY = 50
+
+    MAX_POLL = 50
 
     # Ensure file_count is an integer
     try:
@@ -239,39 +259,130 @@ def get_max_retry(file_count: int, default_retry: int) -> int:
         raise TypeError(f"Expected int for file_count argument, got {file_count!r}")
 
     # Compute polls based on file count
-    retries = default_retry if file_count < 2000 else default_retry * (file_count // 2000)
+    polls = default_poll if file_count < 200 else default_poll * (file_count // 200)
 
-    # Cap retries to MAX_RETRY
-    final_retries = min(retries, MAX_RETRY)
+    # Cap polls to MAX_POLL
+    final_polls = min(polls, MAX_POLL)
 
     # Log if poll increased due to file count or was capped
-    if final_retries != default_retry:
-        if final_retries > MAX_RETRY:
-            LOG(f"Retry capped at {MAX_RETRY} (computed={retries}, files={file_count})")
+    if final_polls != default_poll:
+        if final_polls > MAX_POLL:
+            LOG(f"Polling capped at {MAX_POLL} (computed={polls}, files={file_count})")
         else:
-            LOG(f"Retry increased from {default_retry} → {final_retries} due to large file count ({file_count} files)")
+            LOG(f"Polling increased from {default_poll} → {final_polls} due to large file count ({file_count} files)")
 
-    return final_retries
+    return final_polls
 
 def create_hash_table(retrieve_data: dict, retry: int) -> dict:
     retry_table: dict = {}
     for series in retrieve_data:
-        file_count = series["NumberOfSeriesRelatedInstances"]
         retry_table[series["SeriesInstanceUID"]] = {}
-        retry_table[series["SeriesInstanceUID"]]["retry"] = get_max_retry(file_count, retry)
+        retry_table[series["SeriesInstanceUID"]]["retry"] = retry
         retry_table[series["SeriesInstanceUID"]]["SeriesInstanceUID"] = series["SeriesInstanceUID"]
         retry_table[series["SeriesInstanceUID"]]["StudyInstanceUID"] = series["StudyInstanceUID"]
         retry_table[series["SeriesInstanceUID"]]["AccessionNumber"] = series["AccessionNumber"]
         retry_table[series["SeriesInstanceUID"]]["PatientID"] = series["PatientID"]
         retry_table[series["SeriesInstanceUID"]]["StudyDate"] = series["StudyDate"]
         retry_table[series["SeriesInstanceUID"]]["Modality"] = series["Modality"]
+        retry_table[series["SeriesInstanceUID"]]["NumberOfSeriesRelatedInstances"] = series[
+            "NumberOfSeriesRelatedInstances"]
 
     return retry_table
+
+async def wait_for_sequence(
+    options,
+    client,
+    series_instance: dict,
+    retry: int = 3
+) -> dict:
+
+    MINUTE = 60
+    series_instance_id: str = series_instance["SeriesInstanceUID"]
+
+    # blocking PACS check
+    registered_series_count = client.get_pacs_registered({'SeriesInstanceUID': series_instance_id})
+
+    for i in range(retry):
+        poll_count = 0
+        while registered_series_count < 1 and poll_count < options.maxPoll:
+            poll_count += 1
+            LOG(f"Waiting {options.largeSequencePollInterval} minutes...")
+
+            # ✅ blocking sleep
+            time.sleep(options.largeSequencePollInterval * MINUTE)
+
+            registered_series_count = client.get_pacs_registered({'SeriesInstanceUID': series_instance_id})
+
+            LOG(f"{registered_series_count} series found in CUBE.")
+
+        # Success case
+        if registered_series_count:
+            LOG(f"Series {series_instance_id} successfully registered to CUBE.")
+
+            send_params = {
+                "neuro_dcm_location": options.neuroDicomLocation,
+                "neuro_anon_location": options.neuroAnonLocation,
+                "neuro_nifti_location": options.neuroNiftiLocation,
+                "folder_name": options.folderName,
+                "recipients": options.recipients,
+                "smtp_server": options.SMTPServer
+            }
+
+            dicom_dir = client.get_pacs_files({'SeriesInstanceUID': series_instance_id})
+
+            series_data = json.dumps(series_instance)
+
+            cube_con = ChrisClient(options.CUBEurl, options.CUBEtoken)
+
+            d_ret = await cube_con.anonymize(
+                dicom_dir,
+                send_params,
+                options.pluginInstanceID,
+                series_data
+            )
+
+            return d_ret
+        else:
+            # Retry logic
+            LOG(f"PACS series registration unsuccessful. Retrying retrieve for {series_instance_id}.")
+
+            # retry retrieve
+            retrieve_response = pfdcm.retrieve_pacsfiles(series_instance,
+                                                            options.PACSurl, options.PACSname)
+
+            srs_json_file_path = os.path.join(
+                options.outputdir,
+                f"{series_instance_id}_retrieve_retry_{i}.json"
+            )
+
+            with open(srs_json_file_path, 'w', encoding='utf-8') as jsonf: jsonf.write(
+                json.dumps(retrieve_response, indent=4))
+
+    return {"error": "Could not complete series registration."}
+
+
+
+
+
+# get poll interval relative to sequence size/ file count
+# TBD
+def get_poll_interval(file_count: int, large_seq_count: int, default_poll_interval: int) -> int:
+    # Compute polls based on file count
+    polls = default_poll_interval if file_count < large_seq_count else default_poll_interval * (file_count // large_seq_count)
+    return 0
+
+
 
 
 
 # Recursive method to check on registration and then run anonymization pipeline
 async def check_registration(options: Namespace, retry_table: dict, client: PACSClient, contains_errors: bool=False):
+    # 1) Normal polling for average length series <= 5000 file count
+    # 2) No polling for series with length = 0
+    # 3) For very large series, polling is inefficient; process larger sequences in separate queue
+
+    LARGE_SEQ_COUNT: int = options.largeSequenceSize
+
     # null check
     if len(retry_table) == 0:
         return contains_errors
@@ -283,10 +394,22 @@ async def check_registration(options: Namespace, retry_table: dict, client: PACS
         registered_series_count = client.get_pacs_registered({'SeriesInstanceUID':series_instance})
 
         file_count: int = retry_table[series_instance]["NumberOfSeriesRelatedInstances"]
+        LOG(f"Total no. of files found: {int(file_count)}")
+
+        # separately address large sequences
+        if int(file_count)>LARGE_SEQ_COUNT:
+
+            # run wait task in the background
+            LOG(f"Adding large series to a separate queue.")
+            task = asyncio.create_task(wait_for_sequence(options, client, retry_table[series_instance]))
+            task.add_done_callback(handle_task_result)
+            clone_retry_table.pop(series_instance)
+            continue
+
 
         # poll CUBE at regular interval for the status of file registration
         poll_count: int = 0
-        total_polls: int = options.maxPoll
+        total_polls: int = get_max_poll(file_count, options.maxPoll)
         wait_poll: int = options.pollInterval
         while registered_series_count < 1 and poll_count < total_polls:
             poll_count += 1
@@ -330,6 +453,7 @@ async def check_registration(options: Namespace, retry_table: dict, client: PACS
         clone_retry_table.pop(series_instance)
 
     await check_registration(options, clone_retry_table, client, contains_errors)
+    LOG(f"End of series queue. Any pending large series are being processed in separate queues.")
     return contains_errors
 
 if __name__ == '__main__':

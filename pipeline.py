@@ -171,10 +171,6 @@ class Pipeline:
                     return field.get("value")
         return -1
 
-    async def get_workflow_status(self, workflow_id: int) -> dict:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._get_workflow_status, workflow_id)
-
     def _get_workflow_status(self, workflow_id: int) -> dict:
         """
         1. Get workflow details for a given workflow id.
