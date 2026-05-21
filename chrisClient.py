@@ -72,14 +72,9 @@ class ChrisClient(BaseClient):
 
     def health_check(self):
         endpoint = f"{self.api_base}/"
-        response = requests.request("GET", endpoint, headers=self.headers, timeout=30)
+        response = self.make_request("GET", endpoint)
 
-        response.raise_for_status()
-
-        try:
-            return response.json()
-        except ValueError:
-            return response.text
+        return response
 
     def pacs_pull(self):
         pass  # Placeholder for PACS pull implementation

@@ -189,7 +189,7 @@ def main(options: Namespace, inputdir: Path, outputdir: Path):
     # adding a progress bar and parallelism.
     log_file = os.path.join(outputdir, 'terminal.log')
     logger.add(log_file)
-    if not health_check(options): return
+    if not health_check(options): sys.exit(1)
 
     cube_cl = PACSClient(options.CUBEurl, options.CUBEtoken)
     mapper = PathMapper.file_mapper(inputdir, outputdir, glob=options.inputJSONfile)
