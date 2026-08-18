@@ -82,52 +82,73 @@ class ChrisClient(BaseClient):
     def pacs_push(self):
         pass  # Placeholder for PACS push implementation
 
-    async def anonymize(self, dicom_dir: str, send_params: dict, pv_id: int, series_data: str):
+    async def anonymize(
+            self,
+            dicom_dir: str,
+            send_params: dict,
+            pv_id: int,
+            series_data: str,
+    ):
         """
-        Run the anonymization pipeline for a given DICOM directory and push results to specified neuro locations.
+        Run the anonymization pipeline for a given DICOM directory
+        and push results to specified neuro locations.
         """
         d_series = json.loads(series_data)
-        d_series['Folder Name'] = send_params['folder_name']
-        d_series['SeriesDescription'] = dicom_dir.split('/')[-1]
+        d_series["Folder Name"] = send_params["folder_name"]
+        d_series["SeriesDescription"] = dicom_dir.split("/")[-1]
+
         dsdir_inst_id = self.run_dicomdir_plugin(dicom_dir, pv_id)
 
-        plugin_params = {
-            'send-dicoms-to-neuro-FS': {
-                "path": f"{send_params['neuro_dcm_location']}/{send_params['folder_name']}/",
-                "include": "*.dcm",
+        def build_plugin_params(location_key: str, include: str) -> dict:
+            location = send_params.get(location_key)
+
+            params = {
+                "include": include,
                 "min_size": "0",
                 "timeout": "0",
                 "max_size": "1G",
-                "max_depth": "3"
-            },
-            'send-anon-dicoms-to-neuro-FS': {
-                "path": f"{send_params['neuro_anon_location']}/{send_params['folder_name']}/",
-                "include": "*.dcm",
-                "min_size": "0",
-                "timeout": "0",
-                "max_size": "1G",
-                "max_depth": "3"
-            },
-            'send-niftii-to-neuro-FS': {
-                "path": f"{send_params['neuro_nifti_location']}/{send_params['folder_name']}/",
-                "include": "*",
-                "min_size": "0",
-                "timeout": "0",
-                "max_size": "1G",
-                "max_depth": "3"
+                "max_depth": "3",
             }
+
+            if location:
+                params["path"] = f"{location}/{send_params['folder_name']}/"
+            else:
+                params["include"] = "notransfer"
+                params["error_on_no_transfer"] = "false"
+
+            return params
+
+        plugin_params = {
+            "send-dicoms-to-neuro-FS": build_plugin_params(
+                "neuro_dcm_location",
+                "*.dcm",
+            ),
+            "send-anon-dicoms-to-neuro-FS": build_plugin_params(
+                "neuro_anon_location",
+                "*.dcm",
+            ),
+            "send-niftii-to-neuro-FS": build_plugin_params(
+                "neuro_nifti_location",
+                "*",
+            ),
         }
 
         pipe = Pipeline(self.api_base, self.token)
+
         d_ret = await pipe.run_pipeline(
             previous_inst=dsdir_inst_id,
-            pipeline_name="DICOM anonymization, niftii conversion, and push to neuro tree v20250326",
+            pipeline_name=(
+                "DICOM anonymization, niftii conversion, "
+                "and push to neuro tree v20250326"
+            ),
             pipeline_params=plugin_params,
-            recipients=send_params['recipients'],
-            smtp_server=send_params['smtp_server'],
-            series_data=json.dumps(d_series)
+            recipients=send_params["recipients"],
+            smtp_server=send_params["smtp_server"],
+            series_data=json.dumps(d_series),
         )
+
         return d_ret
+
 
     def run_dicomdir_plugin(self, dicom_dir: str, pv_id: int) -> int:
         """
